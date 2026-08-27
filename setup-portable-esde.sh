@@ -916,7 +916,7 @@ download_esde() {
     # Already have the real AppImage?
     if compgen -G "$outdir/ES-DE*.AppImage" > /dev/null 2>&1; then
         local existing
-        existing=$(find "$outdir" -maxdepth 1 -name 'ES-DE*.AppImage' -print -quit)
+        existing=$(find "$outdir" -maxdepth 1 -iname 'ES-DE*.AppImage' -print -quit)
         if file "$existing" 2>/dev/null | grep -qi "ELF"; then
             ok "ES-DE already exists, skipping"
             return 0
@@ -993,6 +993,7 @@ download_core() {
     local tmpd; tmpd=$(mktemp -d "${TMPDIR:-/tmp}/esde-core.XXXXXX") || return 1
     if curl -sfL -o "$tmpd/$zip_name" "$CORE_BASE_URL/$zip_name" 2>/dev/null; then
         if unzip -qo "$tmpd/$zip_name" -d "$core_dir" 2>/dev/null; then
+            chmod +x "$core_dir/$so_name" 2>/dev/null
             rm -rf "$tmpd"
             return 0
         fi
@@ -1235,7 +1236,7 @@ ROM_DIRS=(
     cps1 cps2 cps3 dos dreamcast famicom fds gamegear
     gb gba gbc gc genesis intellivision mastersystem megacd megadrive
     msx msx2 n3ds n64 nds neogeo neogeocd nes ngp ngpc odyssey2
-    pc pcengine pcenginecd pcfx pico8 pokemini ports ps2 ps3
+    pc pcengine pcenginecd pcfx pico8 pokemini ports emulators ps2 ps3
     psp psx saturn scummvm sega32x segacd sg-1000 snes
     supergrafx switch tg-cd tg16 ti99 uzebox vectrex vic20 videopac
     virtualboy wii wiiu wonderswan wonderswancolor x68000
@@ -1312,6 +1313,54 @@ write_port_launcher "OpenRA" "OpenRA*.AppImage"
 write_port_launcher "Cave Story (NXEngine)" "NXEngine*.AppImage"
 write_port_launcher "OpenTTD (Transport Tycoon)" "OpenTTD*.AppImage"
 
+# Emulators system: lets a user open any bundled emulator's own UI directly
+# (BIOS/firmware install, controller mapping, key import, in-app updates)
+# without needing a ROM first. Unlike the ports launchers above (which have
+# to locate a bare AppImage), each of these just delegates to the emulator's
+# own *-portable.sh wrapper with no arguments — every wrapper ends in
+# `exec "$BIN" "$@"`, so a zero-arg call just opens that emulator's own UI.
+write_emulator_launcher() {
+    local label="$1" wrapper="$2"
+    local out="$ROMS/emulators/${label}.sh"
+    local tmp="$out.tmp.$$"
+    cat > "$tmp" <<EMU_LAUNCHER
+#!/usr/bin/env bash
+set -euo pipefail
+BASE="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/../.." && pwd)"
+WRAPPER="\$BASE/Emulators/$wrapper"
+if [[ ! -x "\$WRAPPER" ]]; then
+    echo "Missing or not executable: \$WRAPPER" >&2
+    echo "Run the ES-DE Portable setup again to (re)generate it, or install this emulator via the component-selection menu." >&2
+    exit 1
+fi
+exec "\$WRAPPER"
+EMU_LAUNCHER
+    backup_file_if_changed "$out" "$tmp" "emulator launcher: ${label}.sh"
+    chmod +x "$out"
+}
+
+write_emulator_launcher "RetroArch" "retroarch-portable.sh"
+write_emulator_launcher "Dolphin" "dolphin-portable.sh"
+write_emulator_launcher "PCSX2" "pcsx2-portable.sh"
+write_emulator_launcher "RPCS3" "rpcs3-portable.sh"
+write_emulator_launcher "DuckStation" "duckstation-portable.sh"
+write_emulator_launcher "PPSSPP" "ppsspp-portable.sh"
+write_emulator_launcher "melonDS" "melonds-portable.sh"
+write_emulator_launcher "Cemu" "cemu-portable.sh"
+write_emulator_launcher "Ryubing" "ryubing-portable.sh"
+write_emulator_launcher "Eden" "eden-portable.sh"
+write_emulator_launcher "shadPS4" "shadps4-portable.sh"
+write_emulator_launcher "86Box" "86box-portable.sh"
+write_emulator_launcher "Xenia" "xenia-portable.sh"
+write_emulator_launcher "Azahar" "azahar-portable.sh"
+write_emulator_launcher "xemu" "xemu-portable.sh"
+write_emulator_launcher "Solarus" "solarus-portable.sh"
+write_emulator_launcher "EKA2L1" "eka2l1-portable.sh"
+write_emulator_launcher "Ruffle" "ruffle-portable.sh"
+write_emulator_launcher "Supermodel" "supermodel-portable.sh"
+write_emulator_launcher "SimCoupe" "simcoupe-portable.sh"
+write_emulator_launcher "Visual Pinball" "VPinball/vpinball-portable.sh"
+
 ok "Directory tree created"
 
 
@@ -1374,7 +1423,7 @@ xml = ['<?xml version="1.0"?>',
 '<!-- %ESPATH% resolves to the AppImage internal mount, not the bundle dir -->',
 '<ruleList>', '',
 emu('RETROARCH',
-    [fp('RetroArch*.AppImage'), fp('retroarch')],
+    [fp('retroarch-portable.sh'), fp('RetroArch*.AppImage'), fp('retroarch')],
     ['retroarch']),
 '',
 '    <core name="RETROARCH">',
@@ -1386,7 +1435,7 @@ entry('/usr/lib64/libretro'),
 '        </rule>',
 '    </core>',
 '',
-emu('DOLPHIN', [fp('dolphin*.AppImage'), fp('Dolphin*.AppImage'),
+emu('DOLPHIN', [fp('dolphin-portable.sh'), fp('dolphin*.AppImage'), fp('Dolphin*.AppImage'),
     '/var/lib/flatpak/exports/bin/org.DolphinEmu.dolphin-emu'], ['dolphin-emu']),
 '',
 emu('PCSX2', [fp('pcsx2-portable.sh'), fp('pcsx2*.AppImage'), fp('PCSX2*.AppImage'),
@@ -1400,7 +1449,7 @@ emu('RPCS3', [fp('rpcs3-portable.sh'), fp('rpcs3*.AppImage'), fp('RPCS3*.AppImag
 # via squashfuse then launches the inner EBOOT.BIN; .iso/.pkg pass through).
 emu('PS3LAUNCH', [fp('ps3-launch.sh')], []),
 '',
-emu('DUCKSTATION', [fp('DuckStation*.AppImage'), fp('duckstation*.AppImage'),
+emu('DUCKSTATION', [fp('duckstation-portable.sh'), fp('DuckStation*.AppImage'), fp('duckstation*.AppImage'),
     '/var/lib/flatpak/exports/bin/org.duckstation.DuckStation'], ['duckstation-qt']),
 '',
 emu('PPSSPP', [fp('ppsspp-portable.sh'), fp('PPSSPP*.AppImage'), fp('ppsspp*.AppImage'),
@@ -1422,7 +1471,7 @@ emu('MAME', [fp('mame*.AppImage')], ['mame']),
 '',
 emu('FLYCAST', [fp('flycast*.AppImage')], ['flycast']),
 '',
-emu('RYUBING', [fp('Ryubing*.AppImage'), fp('ryubing*.AppImage'), fp('ryujinx*.AppImage')], ['Ryubing']),
+emu('RYUBING', [fp('ryubing-portable.sh'), fp('Ryubing*.AppImage'), fp('ryubing*.AppImage'), fp('ryujinx*.AppImage')], ['Ryubing']),
 '',
 emu('EDEN', [fp('eden-portable.sh'), fp('Eden*.AppImage'), fp('eden*.AppImage')], ['eden']),
 '',
@@ -1443,7 +1492,7 @@ emu('3DSEN',
 emu('XEMU', [fp('xemu-portable.sh'), fp('xemu*.AppImage'),
     '/var/lib/flatpak/exports/bin/app.xemu.xemu'], ['xemu']),
 '',
-emu('XENIA', [fp('xenia*.AppImage'), fp('xenia_canary')], ['xenia_canary']),
+emu('XENIA', [fp('xenia-portable.sh'), fp('xenia*.AppImage'), fp('xenia_canary')], ['xenia_canary']),
 '',
 emu('AZAHAR', [fp('azahar-portable.sh'), fp('azahar*.AppImage'), fp('Azahar*.AppImage')], ['azahar']),
 '',
@@ -1901,6 +1950,22 @@ cat > "$CUSTOM_SYSTEMS_TMP" << 'CUSTOMSYSTEMS'
     <name>ports</name>
     <fullname>Ports</fullname>
     <path>%ROMPATH%/ports</path>
+    <extension>.sh .SH .desktop .DESKTOP</extension>
+    <command label="Launch">bash %ROM%</command>
+    <platform>pc</platform>
+    <theme>ports</theme>
+  </system>
+
+  <!-- Emulators system: opens a bundled emulator's own UI directly (BIOS/
+       firmware install, controller mapping, key import, in-app updates)
+       without needing a ROM first. Reuses the "ports" theme for the same
+       reason the Ports system above does — Art Book Next ships no dedicated
+       artwork for this, and a made-up theme name would inherit wrong/broken
+       branding instead of falling back cleanly. -->
+  <system>
+    <name>emulators</name>
+    <fullname>Emulators</fullname>
+    <path>%ROMPATH%/emulators</path>
     <extension>.sh .SH .desktop .DESKTOP</extension>
     <command label="Launch">bash %ROM%</command>
     <platform>pc</platform>
@@ -2814,6 +2879,8 @@ video_vsync = "true"
 video_max_swapchain_images = "3"
 video_scale_integer = "false"
 video_aspect_ratio_auto = "true"
+video_driver = "glcore"
+video_threaded = "true"
 
 # Video context driver — set explicitly to match the user's session so RA
 # doesn't waste a startup cycle attempting Wayland on X11 (or vice versa)
@@ -3006,7 +3073,7 @@ export XDG_DATA_HOME="$BASE_DIR/.local/share"
 export XDG_STATE_HOME="$BASE_DIR/.local/state"
 export XDG_CACHE_HOME="$BASE_DIR/.cache"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -name 'rpcs3*.AppImage' -o -name 'RPCS3*.AppImage' | head -1)
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'rpcs3*.AppImage' | head -1)
 if [[ -z "$BIN" ]]; then
     echo "rpcs3-portable.sh: no RPCS3 AppImage found in $SCRIPT_DIR" >&2
     exit 1
@@ -3143,7 +3210,7 @@ cat > "$EMUS/ppsspp-portable.sh" << 'PPSSPPWRAP'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 mkdir -p "$BASE_DIR/.config/ppsspp"
-BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -name 'PPSSPP*.AppImage' -o -name 'ppsspp*.AppImage' | head -1)
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'PPSSPP*.AppImage' | head -1)
 if [[ -z "$BIN" ]]; then
     echo "ppsspp-portable.sh: no PPSSPP AppImage found in $SCRIPT_DIR" >&2
     exit 1
@@ -3163,7 +3230,7 @@ export XDG_DATA_HOME="$BASE_DIR/.local/share"
 export XDG_STATE_HOME="$BASE_DIR/.local/state"
 export XDG_CACHE_HOME="$BASE_DIR/.cache"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -name 'melonDS*.AppImage' | head -1)
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'melonDS*.AppImage' | head -1)
 if [[ -z "$BIN" ]]; then
     echo "melonds-portable.sh: no melonDS AppImage found in $SCRIPT_DIR" >&2
     exit 1
@@ -3183,7 +3250,7 @@ export XDG_DATA_HOME="$BASE_DIR/.local/share"
 export XDG_STATE_HOME="$BASE_DIR/.local/state"
 export XDG_CACHE_HOME="$BASE_DIR/.cache"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -name 'azahar*.AppImage' -o -name 'Azahar*.AppImage' | head -1)
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'azahar*.AppImage' | head -1)
 if [[ -z "$BIN" ]]; then
     echo "azahar-portable.sh: no Azahar AppImage found in $SCRIPT_DIR" >&2
     exit 1
@@ -3203,7 +3270,7 @@ export XDG_DATA_HOME="$BASE_DIR/.local/share"
 export XDG_STATE_HOME="$BASE_DIR/.local/state"
 export XDG_CACHE_HOME="$BASE_DIR/.cache"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -name 'Cemu*.AppImage' -o -name 'cemu*.AppImage' | head -1)
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'Cemu*.AppImage' | head -1)
 if [[ -z "$BIN" ]]; then
     echo "cemu-portable.sh: no Cemu AppImage found in $SCRIPT_DIR" >&2
     exit 1
@@ -3223,7 +3290,7 @@ export XDG_DATA_HOME="$BASE_DIR/.local/share"
 export XDG_STATE_HOME="$BASE_DIR/.local/state"
 export XDG_CACHE_HOME="$BASE_DIR/.cache"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -name 'xemu*.AppImage' | head -1)
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'xemu*.AppImage' | head -1)
 if [[ -z "$BIN" ]]; then
     echo "xemu-portable.sh: no xemu AppImage found in $SCRIPT_DIR" >&2
     exit 1
@@ -3243,11 +3310,12 @@ export XDG_DATA_HOME="$BASE_DIR/.local/share"
 export XDG_STATE_HOME="$BASE_DIR/.local/state"
 export XDG_CACHE_HOME="$BASE_DIR/.cache"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -name 'Eden*.AppImage' -o -name 'eden*.AppImage' | head -1)
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'Eden*.AppImage' | head -1)
 if [[ -z "$BIN" ]]; then
     echo "eden-portable.sh: no Eden AppImage found in $SCRIPT_DIR" >&2
     exit 1
 fi
+#exec "$SCRIPT_DIR/lsfg-wrap.sh" "$BIN" "$@"
 exec "$BIN" "$@"
 EDENWRAP
 chmod +x "$EMUS/eden-portable.sh"
@@ -3277,7 +3345,7 @@ cat > "$EMUS/86box-portable.sh" << 'BOXWRAP'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 mkdir -p "$BASE_DIR/.config/86box"
-BOX=$(find "$SCRIPT_DIR" -maxdepth 1 -name '86Box*.AppImage' -o -name '86box*.AppImage' | head -1)
+BOX=$(find "$SCRIPT_DIR" -maxdepth 1 -iname '86Box*.AppImage' | head -1)
 if [[ -z "$BOX" ]]; then
     echo "86box-portable.sh: no 86Box AppImage found in $SCRIPT_DIR" >&2
     exit 1
@@ -3285,6 +3353,166 @@ fi
 exec "$BOX" --vmpath "$BASE_DIR/.config/86box" "$@"
 BOXWRAP
 chmod +x "$EMUS/86box-portable.sh"
+
+# lsfg-vk (Decky Loader's Lossless Scaling frame-generation Vulkan layer)
+# integration wrapper. Sourced by emulator wrappers that benefit from frame
+# generation (Dolphin, Eden) instead of duplicated per-wrapper. Graceful
+# no-op if lsfg-vk isn't installed on the host — safe for every user.
+#
+# The portable HOME/XDG_*_HOME override (set by launch.sh, and by every
+# *-portable.sh wrapper) breaks lsfg-vk detection/config three separate ways
+# if left untreated: the Vulkan loader can't find the per-user implicit-layer
+# manifest under the real ~/.local/share, lsfg-vk can't find its own
+# conf.toml under the real ~/.config, and conf.toml's "dll" path (a
+# Steam-Runtime-sandbox-only path the Decky plugin writes) doesn't resolve
+# for AppImages launched directly outside that sandbox. This wrapper heals
+# all three, resolving the *real* user home independently via getent —
+# $HOME cannot be trusted here since it was already overridden to the
+# bundle root before this script runs.
+cat > "$EMUS/lsfg-wrap.sh" << 'LSFGWRAP'
+#!/usr/bin/env bash
+# Wraps a command with the decky-lsfg-vk launch wrapper (~/lsfg) if installed.
+# Usage: lsfg-wrap.sh <command> [args...]
+LOCAL_HOME="$(getent passwd "$(id -u)" | cut -d: -f6)"
+
+LSFG=""
+if [[ -n "$LOCAL_HOME" ]] && [[ -f "$LOCAL_HOME/lsfg" ]]; then
+    LSFG="$LOCAL_HOME/lsfg"
+    export VK_ADD_IMPLICIT_LAYER_PATH="$LOCAL_HOME/.local/share/vulkan/implicit_layer.d"
+    export LSFG_CONFIG="$LOCAL_HOME/.config/lsfg-vk/conf.toml"
+
+    # conf.toml's "dll" path is only valid inside Valve's Steam Runtime
+    # sandbox (the Decky plugin always writes it as /games/...). Heal it to
+    # the real on-disk path on every launch, since the plugin rewrites it
+    # whenever its own settings are touched. LSFG_DLL_PATH is not honored by
+    # lsfg-vk builds seen in the wild — it reads "dll" straight from
+    # conf.toml, hence editing the file instead of an env override.
+    REAL_DLL="$LOCAL_HOME/.local/share/Steam/steamapps/common/Lossless Scaling/Lossless.dll"
+    if [[ -f "$LSFG_CONFIG" && -f "$REAL_DLL" ]]; then
+        ESC_DLL=$(printf '%s' "$REAL_DLL" | sed -e 's/[&#\]/\\&/g')
+        sed -i "s#^dll = .*#dll = \"$ESC_DLL\"#" "$LSFG_CONFIG"
+    fi
+fi
+
+# Unquoted on purpose: when $LSFG is empty (lsfg-vk not installed) this
+# collapses to `exec "$@"`, a plain passthrough.
+exec $LSFG "$@"
+LSFGWRAP
+chmod +x "$EMUS/lsfg-wrap.sh"
+
+# RetroArch — no portable flag needed; HOME/XDG redirection is sufficient.
+# Without this wrapper, launching RetroArch directly (outside launch.sh)
+# falls back to the real ~/.config instead of staying inside the bundle.
+#
+# SDL_GAMECONTROLLER_IGNORE_DEVICES is an extension point, empty by default
+# (a no-op for everyone). Some motherboards/peripherals — e.g. RGB/LED
+# controllers — enumerate as a bogus SDL joystick and get grabbed by
+# RetroArch as a real gamepad. If that happens, find the device's USB
+# vendor:product ID with `lsusb` and set it below, e.g.
+# SDL_GAMECONTROLLER_IGNORE_DEVICES="0x26ce/0x01a2". Space-separate multiple
+# IDs. The equivalent udev-rule approach (ID_INPUT_JOYSTICK=0) has been
+# found unreliable for this — RetroArch/SDL reads raw joystick nodes
+# directly, so this env var is the fix that actually works.
+cat > "$EMUS/retroarch-portable.sh" << 'RETROARCHWRAP'
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+export HOME="$BASE_DIR"
+export XDG_CONFIG_HOME="$BASE_DIR/.config"
+export XDG_DATA_HOME="$BASE_DIR/.local/share"
+export XDG_STATE_HOME="$BASE_DIR/.local/state"
+export XDG_CACHE_HOME="$BASE_DIR/.cache"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+export SDL_GAMECONTROLLER_IGNORE_DEVICES="${SDL_GAMECONTROLLER_IGNORE_DEVICES:-}"
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'RetroArch*.AppImage' | head -1)
+if [[ -z "$BIN" ]]; then
+    echo "retroarch-portable.sh: no RetroArch AppImage found in $SCRIPT_DIR" >&2
+    exit 1
+fi
+exec "$BIN" "$@"
+RETROARCHWRAP
+chmod +x "$EMUS/retroarch-portable.sh"
+
+# Dolphin (GameCube/Wii)
+cat > "$EMUS/dolphin-portable.sh" << 'DOLPHINWRAP'
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+export HOME="$BASE_DIR"
+export XDG_CONFIG_HOME="$BASE_DIR/.config"
+export XDG_DATA_HOME="$BASE_DIR/.local/share"
+export XDG_STATE_HOME="$BASE_DIR/.local/state"
+export XDG_CACHE_HOME="$BASE_DIR/.cache"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'Dolphin*.AppImage' | head -1)
+if [[ -z "$BIN" ]]; then
+    echo "dolphin-portable.sh: no Dolphin AppImage found in $SCRIPT_DIR" >&2
+    exit 1
+fi
+#exec "$SCRIPT_DIR/lsfg-wrap.sh" "$BIN" "$@"
+exec "$BIN" "$@"
+DOLPHINWRAP
+chmod +x "$EMUS/dolphin-portable.sh"
+
+# DuckStation (PS1)
+cat > "$EMUS/duckstation-portable.sh" << 'DUCKSTATIONWRAP'
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+export HOME="$BASE_DIR"
+export XDG_CONFIG_HOME="$BASE_DIR/.config"
+export XDG_DATA_HOME="$BASE_DIR/.local/share"
+export XDG_STATE_HOME="$BASE_DIR/.local/state"
+export XDG_CACHE_HOME="$BASE_DIR/.cache"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'DuckStation*.AppImage' | head -1)
+if [[ -z "$BIN" ]]; then
+    echo "duckstation-portable.sh: no DuckStation AppImage found in $SCRIPT_DIR" >&2
+    exit 1
+fi
+exec "$BIN" "$@"
+DUCKSTATIONWRAP
+chmod +x "$EMUS/duckstation-portable.sh"
+
+# Ryubing (Ryujinx fork, Switch) — upstream release filenames have used both
+# "Ryubing*" and "ryujinx*" naming, hence matching both.
+cat > "$EMUS/ryubing-portable.sh" << 'RYUBINGWRAP'
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+export HOME="$BASE_DIR"
+export XDG_CONFIG_HOME="$BASE_DIR/.config"
+export XDG_DATA_HOME="$BASE_DIR/.local/share"
+export XDG_STATE_HOME="$BASE_DIR/.local/state"
+export XDG_CACHE_HOME="$BASE_DIR/.cache"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'Ryubing*.AppImage' -o -iname 'ryujinx*.AppImage' | head -1)
+if [[ -z "$BIN" ]]; then
+    echo "ryubing-portable.sh: no Ryubing/Ryujinx AppImage found in $SCRIPT_DIR" >&2
+    exit 1
+fi
+exec "$BIN" "$@"
+RYUBINGWRAP
+chmod +x "$EMUS/ryubing-portable.sh"
+
+# Xenia Canary (Xbox 360) — installed as a bare binary, not an AppImage.
+cat > "$EMUS/xenia-portable.sh" << 'XENIAWRAP'
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+export HOME="$BASE_DIR"
+export XDG_CONFIG_HOME="$BASE_DIR/.config"
+export XDG_DATA_HOME="$BASE_DIR/.local/share"
+export XDG_STATE_HOME="$BASE_DIR/.local/state"
+export XDG_CACHE_HOME="$BASE_DIR/.cache"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+if [[ ! -x "$SCRIPT_DIR/xenia_canary" ]]; then
+    echo "xenia-portable.sh: xenia_canary binary not found or not executable at $SCRIPT_DIR/xenia_canary" >&2
+    exit 1
+fi
+exec "$SCRIPT_DIR/xenia_canary" "$@"
+XENIAWRAP
+chmod +x "$EMUS/xenia-portable.sh"
 
 # VPinball — uses portable HOME/XDG paths plus an explicit PinMAME tree
 # TABLES_PATH is read by some community VPX Standalone forks (and a few
@@ -3550,7 +3778,7 @@ chmod +x "$SCRIPT_DIR"/*.AppImage 2>/dev/null || true
 chmod +x "$SCRIPT_DIR"/Emulators/*.AppImage 2>/dev/null || true
 chmod +x "$SCRIPT_DIR"/Emulators/*.sh 2>/dev/null || true
 
-ESDE_BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -name 'ES-DE*.AppImage' -o -name 'esde*.AppImage' | head -1)
+ESDE_BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'ES-DE*.AppImage' | head -1)
 
 if [[ -z "$ESDE_BIN" ]]; then
     echo "ERROR: No ES-DE AppImage found in $SCRIPT_DIR"
@@ -3591,6 +3819,13 @@ export __GL_SHADER_DISK_CACHE_PATH="$SCRIPT_DIR/.cache/nv"
 export CUDA_CACHE_PATH="$SCRIPT_DIR/.cache/nv/ComputeCache"
 export MESA_SHADER_CACHE_DIR="$SCRIPT_DIR/.cache/mesa"
 mkdir -p "$__GL_SHADER_DISK_CACHE_PATH" "$CUDA_CACHE_PATH" "$MESA_SHADER_CACHE_DIR"
+
+# Steam's Big Picture/gamemode injects LD_PRELOAD=.../gameoverlayrenderer.so
+# into anything it launches. That overlay hook can deadlock glXSwapBuffers
+# under gamescope (RetroArch's Quick Menu renders but stops responding to
+# input). Drop it before exec'ing anything downstream so no emulator in the
+# bundle inherits it.
+unset LD_PRELOAD
 
 # Apply desired theme before launch — ES-DE may overwrite settings on exit
 # so we also re-apply after. Belt and suspenders.
@@ -5750,6 +5985,7 @@ install_core() {
     local tmp="/tmp/$zip_name"
     if curl -sfL -o "$tmp" "$CORE_BASE_URL/$zip_name"; then
         if unzip -qo "$tmp" -d "$CORE_DIR" 2>/dev/null; then
+            chmod +x "$CORE_DIR/$so_name" 2>/dev/null || true
             rm -f "$tmp"
             ok "Installed $core_name"
             return 0
@@ -9303,7 +9539,7 @@ check_and_update() {
 # build (avcodec-*.dll, magic 504b0304). Every download is now ELF-validated in
 # a temp file BEFORE it may replace the working AppImage.
 echo -e "${CYAN}ES-DE Frontend:${NC}"
-ESDE_CURRENT=$(find "$SCRIPT_DIR" -maxdepth 1 -name 'ES-DE*.AppImage' | head -1)
+ESDE_CURRENT=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'ES-DE*.AppImage' | head -1)
 if [[ -n "$ESDE_CURRENT" ]]; then
     printf "   %-32s" "ES-DE"
     ESDE_API="https://gitlab.com/api/v4/projects/es-de%2Femulationstation-de/releases/permalink/latest"
@@ -9402,7 +9638,7 @@ if [[ -n "$RPCS3_CURRENT" || -f "$EMUS/rpcs3-portable.sh" ]]; then
 fi
 
 # RetroArch (nightly)
-RA_CURRENT=$(find "$EMUS" -maxdepth 1 -name 'RetroArch*.AppImage' | head -1)
+RA_CURRENT=$(find "$EMUS" -maxdepth 1 -iname 'RetroArch*.AppImage' | head -1)
 if [[ -n "$RA_CURRENT" ]]; then
     printf "   %-32s" "RetroArch"
     echo -e " ${CYAN}[nightly — always latest when re-downloaded]${NC}"
@@ -9639,6 +9875,7 @@ if wt_yesno "Update" "Update all cores from buildbot.libretro.com?"; then
         printf "   %-35s" "$CORE_NAME"
         if curl -sfL -o "/tmp/$ZIP" "$CORE_URL/$ZIP" 2>/dev/null && \
            unzip -qo "/tmp/$ZIP" -d "$CORE_DIR" 2>/dev/null; then
+            chmod +x "$SO" 2>/dev/null || true
             echo -e " ${GREEN}[ok]${NC}"
             UPDATED=$((UPDATED + 1))
         else
@@ -9670,7 +9907,7 @@ if [[ "$CREATE_SHORTCUT" == "yes" ]]; then
     mkdir -p "$DESKTOP_DIR"
 
     # Extract ES-DE icon from AppImage
-    ESDE_APPIMAGE=$(find "$BASE" -maxdepth 1 -name 'ES-DE*.AppImage' | head -1)
+    ESDE_APPIMAGE=$(find "$BASE" -maxdepth 1 -iname 'ES-DE*.AppImage' | head -1)
     ICON_PATH="$BASE/ES-DE/es-de.png"
     if [[ -n "$ESDE_APPIMAGE" && ! -f "$ICON_PATH" ]]; then
         info "Extracting ES-DE icon..."
