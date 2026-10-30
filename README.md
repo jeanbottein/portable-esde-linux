@@ -272,6 +272,7 @@ Run a read only import audit:
 ES-DE/
 ├── ES-DE_x64.AppImage
 ├── launch.sh
+├── fix-permissions.sh
 ├── update.sh
 ├── import-collection.sh
 ├── fetch-vpx-patches.sh
@@ -356,6 +357,36 @@ The importer checks BIOS status and routes recognised BIOS sidecars into `ROMs/b
 ```
 
 The update helper checks emulator AppImages and RetroArch cores. It keeps existing files unless you choose to replace them.
+
+</details>
+
+<details>
+<summary><strong>Moving or copying the bundle</strong></summary>
+
+The whole folder is portable: move or copy it to another folder, drive or machine (for example a Steam Deck SD card) and start it with `./launch.sh`. On every launch it rewrites the absolute paths stored in configs to the bundle's current location:
+
+- ES-DE ROM and media folders (`es_settings.xml`) and emulator locations (`es_find_rules.xml`)
+- RetroArch core, BIOS, save, state, screenshot and log folders
+- Eden NAND, SD, load and dump folders (Switch firmware, keys and saves) and game folders
+- Dolphin game folder
+
+The previous location is read from `.bundle-path` and from the config files themselves, so paths still heal if `.bundle-path` is missing or stale.
+
+When copying, include the hidden files and keep permissions:
+
+```bash
+rsync -a ES-DE/ /path/to/new/ES-DE/
+```
+
+The hidden folders (`.config`, `.local`) hold every emulator's settings, firmware, keys and many saves; a copy without them starts from scratch. `.cache` can be skipped, it is rebuilt.
+
+If a copy lost execute permissions (exFAT/NTFS drives, some file managers, cloud sync), restore them with:
+
+```bash
+bash fix-permissions.sh
+```
+
+It marks scripts, AppImages, RetroArch cores and emulator binaries executable again and never touches ROMs.
 
 </details>
 
