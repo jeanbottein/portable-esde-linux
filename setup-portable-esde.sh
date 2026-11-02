@@ -289,8 +289,7 @@ EMULATOR_CHECKLIST=(
     " |── Nintendo ──────────────────────────────────"
     "dolphin|Dolphin - GameCube / Wii"
     "cemu|Cemu - Wii U"
-    "ryujinx|Ryubing - Nintendo Switch (Ryujinx fork)"
-    "eden|Eden - Nintendo Switch (alt fork)"
+    "eden|Eden - Nintendo Switch"
     "azahar|Azahar - Nintendo 3DS"
     "melonds|melonDS - Nintendo DS"
     "  |── Sony ─────────────────────────────────────"
@@ -1347,7 +1346,6 @@ write_emulator_launcher "DuckStation" "duckstation-portable.sh"
 write_emulator_launcher "PPSSPP" "ppsspp-portable.sh"
 write_emulator_launcher "melonDS" "melonds-portable.sh"
 write_emulator_launcher "Cemu" "cemu-portable.sh"
-write_emulator_launcher "Ryubing" "ryubing-portable.sh"
 write_emulator_launcher "Eden" "eden-portable.sh"
 write_emulator_launcher "shadPS4" "shadps4-portable.sh"
 write_emulator_launcher "86Box" "86box-portable.sh"
@@ -1471,8 +1469,6 @@ emu('MAME', [fp('mame*.AppImage')], ['mame']),
 '',
 emu('FLYCAST', [fp('flycast*.AppImage')], ['flycast']),
 '',
-emu('RYUBING', [fp('ryubing-portable.sh'), fp('Ryubing*.AppImage'), fp('ryubing*.AppImage'), fp('ryujinx*.AppImage')], ['Ryubing']),
-'',
 emu('EDEN', [fp('eden-portable.sh'), fp('Eden*.AppImage'), fp('eden*.AppImage')], ['eden']),
 '',
 emu('SHADPS4',
@@ -1531,7 +1527,6 @@ emu('VPINBALL',
 os.makedirs(os.path.dirname(out_path), exist_ok=True)
 with open(out_path, 'w') as f:
     f.write('\n'.join(xml) + '\n')
-print(f"Written: {out_path}")
 PYEOF
 backup_file_if_changed "$FIND_RULES_FILE" "$FIND_RULES_TMP" "es_find_rules.xml"
 
@@ -1768,6 +1763,16 @@ cat > "$CUSTOM_SYSTEMS_TMP" << 'CUSTOMSYSTEMS'
     <command label="melonDS">%EMULATOR_MELONDS% %ROM%</command>
     <platform>nds</platform>
     <theme>nds</theme>
+  </system>
+
+  <system>
+    <name>switch</name>
+    <fullname>Nintendo Switch</fullname>
+    <path>%ROMPATH%/switch</path>
+    <extension>.nca .NCA .nro .NRO .nso .NSO .nsp .NSP .xci .XCI</extension>
+    <command label="Eden">%EMULATOR_EDEN% -f -g %ROM%</command>
+    <platform>switch</platform>
+    <theme>switch</theme>
   </system>
 
   <system>
@@ -3474,27 +3479,6 @@ exec "$BIN" "$@"
 DUCKSTATIONWRAP
 chmod +x "$EMUS/duckstation-portable.sh"
 
-# Ryubing (Ryujinx fork, Switch) — upstream release filenames have used both
-# "Ryubing*" and "ryujinx*" naming, hence matching both.
-cat > "$EMUS/ryubing-portable.sh" << 'RYUBINGWRAP'
-#!/usr/bin/env bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
-export HOME="$BASE_DIR"
-export XDG_CONFIG_HOME="$BASE_DIR/.config"
-export XDG_DATA_HOME="$BASE_DIR/.local/share"
-export XDG_STATE_HOME="$BASE_DIR/.local/state"
-export XDG_CACHE_HOME="$BASE_DIR/.cache"
-mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-BIN=$(find "$SCRIPT_DIR" -maxdepth 1 -iname 'Ryubing*.AppImage' -o -iname 'ryujinx*.AppImage' | head -1)
-if [[ -z "$BIN" ]]; then
-    echo "ryubing-portable.sh: no Ryubing/Ryujinx AppImage found in $SCRIPT_DIR" >&2
-    exit 1
-fi
-exec "$BIN" "$@"
-RYUBINGWRAP
-chmod +x "$EMUS/ryubing-portable.sh"
-
 # Xenia Canary (Xbox 360) — installed as a bare binary, not an AppImage.
 cat > "$EMUS/xenia-portable.sh" << 'XENIAWRAP'
 #!/usr/bin/env bash
@@ -3934,7 +3918,6 @@ LAUNCHER
 backup_file_if_changed "${LAUNCH_FILE}" "${LAUNCH_TMP}" "launch.sh"
 
 chmod +x "$BASE/launch.sh"
-ok "launch.sh written"
 
 # fix-permissions.sh: copies that drop Unix permissions (exFAT/NTFS drives,
 # some file managers, cloud sync) leave every AppImage/wrapper non-executable;
@@ -4373,8 +4356,6 @@ Made with ❤️ for the Linux retro gaming community
 MAINREADME
 backup_file_if_changed "${README_FILE}" "${README_TMP}" "README.md"
 
-ok "READMEs written"
-
 #=============================================================================
 # STEP 8: DOWNLOAD ES-DE
 #=============================================================================
@@ -4542,39 +4523,6 @@ install_xenia() {
     fi
 }
 
-install_ryujinx() {
-    # Ryubing (Ryujinx fork) is hosted on a self-managed Forgejo (Gitea)
-    # instance at git.ryujinx.app. It was DMCA'd off GitHub, so there is no
-    # GitHub mirror to fall back to.
-    if compgen -G "$EMUS/ryujinx*.AppImage" > /dev/null 2>&1; then
-        ok "Ryubing already exists, skipping"
-    else
-        info "Downloading Ryubing ..."
-        # Query the Forgejo (Gitea) API directly. The previous GitHub-first
-        # attempt only wasted a rate-limited api.github.com request against the
-        # DMCA-blocked repo before falling back to exactly this endpoint.
-        RYUBING_URL=$(curl -sfL --max-time 20 "https://git.ryujinx.app/api/v1/repos/ryubing/ryujinx/releases?limit=5" \
-            | grep -oP '"browser_download_url":\s*"\K[^"]*' \
-            | grep -P "x64\.AppImage$" \
-            | grep -ivE 'arm|aarch' \
-            | head -1) || true
-        if [[ -n "$RYUBING_URL" ]]; then
-            RYUBING_FNAME=$(basename "$RYUBING_URL")
-            if curl -#fL -o "$EMUS/$RYUBING_FNAME" "$RYUBING_URL"; then
-                chmod +x "$EMUS/$RYUBING_FNAME"
-                ok "Ryubing downloaded: $RYUBING_FNAME"
-            else
-                fail "Ryubing download failed"
-                DOWNLOAD_ERRORS=$((DOWNLOAD_ERRORS + 1))
-                rm -f "$EMUS/$RYUBING_FNAME"
-            fi
-        else
-            warn "Ryubing URL not found — download manually from https://git.ryujinx.app/ryubing/ryujinx"
-            DOWNLOAD_ERRORS=$((DOWNLOAD_ERRORS + 1))
-        fi
-    fi
-}
-
 install_eden() {
     # Eden is hosted on git.eden-emu.dev (Gitea instance, not GitHub)
     # Stable releases: git.eden-emu.dev/eden-emu/eden
@@ -4649,7 +4597,7 @@ install_shadps4() {
                     chmod +x "$EMUS/shadps4"
                     # Copy .so files from same dir (shadPS4 bundles Qt libs)
                     find "$BIN_DIR" -maxdepth 1 -name "*.so*" -exec cp {} "$EMUS/" \; 2>/dev/null || true
-                    find "$BIN_DIR" -maxdepth 1 -type d -exec cp -r {} "$EMUS/" \; 2>/dev/null || true
+                    find "$BIN_DIR" -mindepth 1 -maxdepth 1 -type d -exec cp -r {} "$EMUS/" \; 2>/dev/null || true
                     ok "shadPS4 downloaded"
                 else
                     fail "Could not find shadPS4 binary inside archive"
@@ -4686,22 +4634,37 @@ install_vpinball() {
         VPINBALL_COUNT_FILE=$(mktemp)
         echo 0 > "$VPINBALL_COUNT_FILE"
 
-        # Fetch BGFX and GL zip URLs from the latest release only
-        VPINBALL_URLS=$(curl -sfL "https://api.github.com/repos/vpinball/vpinball/releases?per_page=1"         | grep -oP '"browser_download_url":\s*"\K[^"]*'         | grep -iP "VPinballX_(BGFX|GL)-.*linux.*x64.*\.zip$"         | grep -iv "debug\|symbols") || true
+        # Linux x64 BGFX + GL archives from the newest release that has them.
+        # Since 10.8.1-5436 the Linux builds ship as a bare .tar.gz; earlier
+        # builds wrapped the tarball in a .zip. Accept both. per_page=5 plus
+        # tag pinning skips releases with no Linux assets (e.g. 3784) and keeps
+        # BGFX and GL from the same build.
+        VPINBALL_URLS=$(curl -sfL "https://api.github.com/repos/vpinball/vpinball/releases?per_page=5" \
+            | grep -oP '"browser_download_url":\s*"\K[^"]*' \
+            | grep -iP 'VPinballX_(BGFX|GL)-[^/]*-linux-x64[^/]*\.(zip|tar\.gz)$' \
+            | grep -iv "debug\|symbols") || true
+        if [[ -n "$VPINBALL_URLS" ]]; then
+            VPINBALL_TAG=$(head -1 <<< "$VPINBALL_URLS" | sed -E 's#.*/releases/download/([^/]+)/.*#\1#')
+            VPINBALL_URLS=$(grep -F "/download/$VPINBALL_TAG/" <<< "$VPINBALL_URLS") || true
+        fi
 
         if [[ -z "$VPINBALL_URLS" ]]; then
             warn "VPinball download URL not found — check https://github.com/vpinball/vpinball/releases"
             DOWNLOAD_ERRORS=$((DOWNLOAD_ERRORS + 1))
         else
-            # Download and extract each zip — VPinball zips contain a tar.gz inside
+            # Download and extract each archive. Current builds are a bare
+            # .tar.gz; older builds were a .zip wrapping the .tar.gz.
             while IFS= read -r VPURL; do
                 [[ -z "$VPURL" ]] && continue
                 VPZIP=$(basename "$VPURL")
                 info "Downloading $VPZIP ..."
                 if curl -#fL -o "$VPINBALL_TMP/$VPZIP" "$VPURL"; then
-                    # Step 1: unzip to get the tar.gz inside
-                    unzip -qo "$VPINBALL_TMP/$VPZIP" -d "$VPINBALL_TMP" 2>/dev/null || true
-                    # Step 2: extract any tar.gz that came out of the zip
+                    # Step 1 (legacy .zip only): unzip to get the tar.gz inside
+                    if [[ "$VPZIP" == *.zip ]]; then
+                        unzip -qo "$VPINBALL_TMP/$VPZIP" -d "$VPINBALL_TMP" 2>/dev/null || true
+                        rm -f "$VPINBALL_TMP/$VPZIP"
+                    fi
+                    # Step 2: extract the tar.gz (downloaded directly or from the zip)
                     for TGZ in "$VPINBALL_TMP"/*.tar.gz "$VPINBALL_TMP"/*.tar.xz; do
                         [[ -f "$TGZ" ]] || continue
                         mkdir -p "$VPINBALL_TMP/extract"
@@ -4768,7 +4731,7 @@ install_vpinball() {
                 # into ROMs/vpinball/pinmame/roms/ themselves (copyrighted, like
                 # arcade ROMs — not bundled).
                 mkdir -p "$ROMS/vpinball/pinmame/roms" "$ROMS/vpinball/pinmame/nvram" "$ROMS/vpinball/pinmame/altcolor" "$ROMS/vpinball/pinmame/altsound" "$ROMS/vpinball/pinmame/cfg" "$ROMS/vpinball/pinmame/samples" "$ROMS/vpinball/pinmame/ini" "$ROMS/vpinball/music"
-                ok "VPinball downloaded ($VPINBALL_GOT zip(s) extracted, $VP_LIBS shared libs)"
+                ok "VPinball downloaded ($VPINBALL_TAG: $VPINBALL_GOT archive(s), $VP_LIBS shared libs)"
             else
                 fail "VPinball downloads all failed"
                 DOWNLOAD_ERRORS=$((DOWNLOAD_ERRORS + 1))
@@ -5152,14 +5115,6 @@ if emu_selected xenia; then
 else
     info "Skipped xenia (deselected)"
 fi
-
-echo "   ── Ryubing (Nintendo Switch) ──"
-if emu_selected ryujinx; then
-    install_ryujinx
-else
-    info "Skipped ryujinx (deselected)"
-fi
-echo ""
 
 echo "   ── Eden (Nintendo Switch) ──"
 if emu_selected eden; then
@@ -6036,7 +5991,6 @@ is_emulator_installed() {
         azahar)      compgen -G "$EMUS/[aA]zahar*" > /dev/null ;;
         xemu)        compgen -G "$EMUS/xemu*" > /dev/null ;;
         xenia)       compgen -G "$EMUS/[xX]enia*" > /dev/null ;;
-        ryujinx)     compgen -G "$EMUS/[rR]yujinx*" > /dev/null || compgen -G "$EMUS/[rR]yubing*" > /dev/null ;;
         eden)        compgen -G "$EMUS/[eE]den*" > /dev/null ;;
         shadps4)     compgen -G "$EMUS/[sS]hadps4*" > /dev/null ;;
         _86box)      compgen -G "$EMUS/86[bB]ox*" > /dev/null || compgen -G "$EMUS/_86Box*" > /dev/null ;;
@@ -6358,39 +6312,6 @@ install_xenia() {
     fi
 }
 
-install_ryujinx() {
-    # Ryubing (Ryujinx fork) is hosted on a self-managed Forgejo (Gitea)
-    # instance at git.ryujinx.app. It was DMCA'd off GitHub, so there is no
-    # GitHub mirror to fall back to.
-    if compgen -G "$EMUS/ryujinx*.AppImage" > /dev/null 2>&1; then
-        ok "Ryubing already exists, skipping"
-    else
-        info "Downloading Ryubing ..."
-        # Query the Forgejo (Gitea) API directly. The previous GitHub-first
-        # attempt only wasted a rate-limited api.github.com request against the
-        # DMCA-blocked repo before falling back to exactly this endpoint.
-        RYUBING_URL=$(curl -sfL --max-time 20 "https://git.ryujinx.app/api/v1/repos/ryubing/ryujinx/releases?limit=5" \
-            | grep -oP '"browser_download_url":\s*"\K[^"]*' \
-            | grep -P "x64\.AppImage$" \
-            | grep -ivE 'arm|aarch' \
-            | head -1) || true
-        if [[ -n "$RYUBING_URL" ]]; then
-            RYUBING_FNAME=$(basename "$RYUBING_URL")
-            if curl -#fL -o "$EMUS/$RYUBING_FNAME" "$RYUBING_URL"; then
-                chmod +x "$EMUS/$RYUBING_FNAME"
-                ok "Ryubing downloaded: $RYUBING_FNAME"
-            else
-                fail "Ryubing download failed"
-                DOWNLOAD_ERRORS=$((DOWNLOAD_ERRORS + 1))
-                rm -f "$EMUS/$RYUBING_FNAME"
-            fi
-        else
-            warn "Ryubing URL not found — download manually from https://git.ryujinx.app/ryubing/ryujinx"
-            DOWNLOAD_ERRORS=$((DOWNLOAD_ERRORS + 1))
-        fi
-    fi
-}
-
 install_eden() {
     # Eden is hosted on git.eden-emu.dev (Gitea instance, not GitHub)
     # Stable releases: git.eden-emu.dev/eden-emu/eden
@@ -6465,7 +6386,7 @@ install_shadps4() {
                     chmod +x "$EMUS/shadps4"
                     # Copy .so files from same dir (shadPS4 bundles Qt libs)
                     find "$BIN_DIR" -maxdepth 1 -name "*.so*" -exec cp {} "$EMUS/" \; 2>/dev/null || true
-                    find "$BIN_DIR" -maxdepth 1 -type d -exec cp -r {} "$EMUS/" \; 2>/dev/null || true
+                    find "$BIN_DIR" -mindepth 1 -maxdepth 1 -type d -exec cp -r {} "$EMUS/" \; 2>/dev/null || true
                     ok "shadPS4 downloaded"
                 else
                     fail "Could not find shadPS4 binary inside archive"
@@ -6502,22 +6423,37 @@ install_vpinball() {
         VPINBALL_COUNT_FILE=$(mktemp)
         echo 0 > "$VPINBALL_COUNT_FILE"
 
-        # Fetch BGFX and GL zip URLs from the latest release only
-        VPINBALL_URLS=$(curl -sfL "https://api.github.com/repos/vpinball/vpinball/releases?per_page=1"         | grep -oP '"browser_download_url":\s*"\K[^"]*'         | grep -iP "VPinballX_(BGFX|GL)-.*linux.*x64.*\.zip$"         | grep -iv "debug\|symbols") || true
+        # Linux x64 BGFX + GL archives from the newest release that has them.
+        # Since 10.8.1-5436 the Linux builds ship as a bare .tar.gz; earlier
+        # builds wrapped the tarball in a .zip. Accept both. per_page=5 plus
+        # tag pinning skips releases with no Linux assets (e.g. 3784) and keeps
+        # BGFX and GL from the same build.
+        VPINBALL_URLS=$(curl -sfL "https://api.github.com/repos/vpinball/vpinball/releases?per_page=5" \
+            | grep -oP '"browser_download_url":\s*"\K[^"]*' \
+            | grep -iP 'VPinballX_(BGFX|GL)-[^/]*-linux-x64[^/]*\.(zip|tar\.gz)$' \
+            | grep -iv "debug\|symbols") || true
+        if [[ -n "$VPINBALL_URLS" ]]; then
+            VPINBALL_TAG=$(head -1 <<< "$VPINBALL_URLS" | sed -E 's#.*/releases/download/([^/]+)/.*#\1#')
+            VPINBALL_URLS=$(grep -F "/download/$VPINBALL_TAG/" <<< "$VPINBALL_URLS") || true
+        fi
 
         if [[ -z "$VPINBALL_URLS" ]]; then
             warn "VPinball download URL not found — check https://github.com/vpinball/vpinball/releases"
             DOWNLOAD_ERRORS=$((DOWNLOAD_ERRORS + 1))
         else
-            # Download and extract each zip — VPinball zips contain a tar.gz inside
+            # Download and extract each archive. Current builds are a bare
+            # .tar.gz; older builds were a .zip wrapping the .tar.gz.
             while IFS= read -r VPURL; do
                 [[ -z "$VPURL" ]] && continue
                 VPZIP=$(basename "$VPURL")
                 info "Downloading $VPZIP ..."
                 if curl -#fL -o "$VPINBALL_TMP/$VPZIP" "$VPURL"; then
-                    # Step 1: unzip to get the tar.gz inside
-                    unzip -qo "$VPINBALL_TMP/$VPZIP" -d "$VPINBALL_TMP" 2>/dev/null || true
-                    # Step 2: extract any tar.gz that came out of the zip
+                    # Step 1 (legacy .zip only): unzip to get the tar.gz inside
+                    if [[ "$VPZIP" == *.zip ]]; then
+                        unzip -qo "$VPINBALL_TMP/$VPZIP" -d "$VPINBALL_TMP" 2>/dev/null || true
+                        rm -f "$VPINBALL_TMP/$VPZIP"
+                    fi
+                    # Step 2: extract the tar.gz (downloaded directly or from the zip)
                     for TGZ in "$VPINBALL_TMP"/*.tar.gz "$VPINBALL_TMP"/*.tar.xz; do
                         [[ -f "$TGZ" ]] || continue
                         mkdir -p "$VPINBALL_TMP/extract"
@@ -6584,7 +6520,7 @@ install_vpinball() {
                 # into ROMs/vpinball/pinmame/roms/ themselves (copyrighted, like
                 # arcade ROMs — not bundled).
                 mkdir -p "$ROMS/vpinball/pinmame/roms" "$ROMS/vpinball/pinmame/nvram" "$ROMS/vpinball/pinmame/altcolor" "$ROMS/vpinball/pinmame/altsound" "$ROMS/vpinball/pinmame/cfg" "$ROMS/vpinball/pinmame/samples" "$ROMS/vpinball/pinmame/ini" "$ROMS/vpinball/music"
-                ok "VPinball downloaded ($VPINBALL_GOT zip(s) extracted, $VP_LIBS shared libs)"
+                ok "VPinball downloaded ($VPINBALL_TAG: $VPINBALL_GOT archive(s), $VP_LIBS shared libs)"
             else
                 fail "VPinball downloads all failed"
                 DOWNLOAD_ERRORS=$((DOWNLOAD_ERRORS + 1))
@@ -6885,7 +6821,6 @@ install_emulator() {
         azahar)       install_azahar ;;
         xemu)         install_xemu ;;
         xenia)        install_xenia ;;
-        ryujinx)      install_ryujinx ;;
         eden)         install_eden ;;
         shadps4)      install_shadps4 ;;
         _86box)       install__86box ;;
@@ -9335,7 +9270,6 @@ CONVSCRIPT
 backup_file_if_changed "${IMPORTER_FILE}" "${IMPORTER_TMP}" "import-collection.sh"
 
 chmod +x "$BASE/import-collection.sh"
-ok "import-collection.sh written to bundle"
 
 
 # Deploy fetch-vpx-patches.sh — pulls VPX Standalone sidecar scripts for
@@ -9471,7 +9405,6 @@ echo "tables you add later will be picked up on the next run."
 FETCHVPXSCRIPT
 backup_file_if_changed "${VPX_FETCH_FILE}" "${VPX_FETCH_TMP}" "fetch-vpx-patches.sh"
 chmod +x "$BASE/fetch-vpx-patches.sh"
-ok "fetch-vpx-patches.sh written to bundle"
 
 
 #=============================================================================
@@ -9866,21 +9799,37 @@ if [[ -n "$SHADPS4_CURRENT" ]]; then
     echo ""
 fi
 
-# VPinball — zip-within-tar.gz, re-download to update
+# VPinball — Linux x64 .tar.gz (legacy builds: .tar.gz inside a .zip)
 VPDIR="$EMUS/VPinball"
 if [[ -f "$VPDIR/VPinballX_BGFX" ]] || [[ -f "$VPDIR/VPinballX_GL" ]]; then
     printf "   %-32s" "VPinball (Visual Pinball)"
-    echo -e " ${CYAN}[zip release — re-download to update]${NC}"
+    echo -e " ${CYAN}[archive release — re-download to update]${NC}"
     if wt_yesno "Update: VPinball" "Re-download the latest VPinball (BGFX + GL) release?"; then
-        VPIN_URLS=$(curl -sfL "https://api.github.com/repos/vpinball/vpinball/releases?per_page=1"             | grep -oP '"browser_download_url":\s*"\K[^"]*'             | grep -iP "VPinballX_(BGFX|GL)-.*linux.*x64.*\.zip$"             | grep -iv "debug\|symbols") || true
+        # Linux x64 BGFX + GL archives from the newest release that has them.
+        # Since 10.8.1-5436 the Linux builds ship as a bare .tar.gz; earlier
+        # builds wrapped the tarball in a .zip. Accept both. per_page=5 plus
+        # tag pinning skips releases with no Linux assets (e.g. 3784) and keeps
+        # BGFX and GL from the same build.
+        VPIN_URLS=$(curl -sfL "https://api.github.com/repos/vpinball/vpinball/releases?per_page=5" \
+            | grep -oP '"browser_download_url":\s*"\K[^"]*' \
+            | grep -iP 'VPinballX_(BGFX|GL)-[^/]*-linux-x64[^/]*\.(zip|tar\.gz)$' \
+            | grep -iv "debug\|symbols") || true
+        if [[ -n "$VPIN_URLS" ]]; then
+            VPIN_TAG=$(head -1 <<< "$VPIN_URLS" | sed -E 's#.*/releases/download/([^/]+)/.*#\1#')
+            VPIN_URLS=$(grep -F "/download/$VPIN_TAG/" <<< "$VPIN_URLS") || true
+        fi
         if [[ -n "$VPIN_URLS" ]]; then
             VPIN_TMP=$(mktemp -d)
+            VPIN_GOT=0
             while IFS= read -r VURL; do
                 [[ -z "$VURL" ]] && continue
                 VZIP=$(basename "$VURL")
                 info "Downloading $VZIP ..."
                 if curl -#fL -o "$VPIN_TMP/$VZIP" "$VURL"; then
-                    unzip -qo "$VPIN_TMP/$VZIP" -d "$VPIN_TMP" 2>/dev/null || true
+                    if [[ "$VZIP" == *.zip ]]; then
+                        unzip -qo "$VPIN_TMP/$VZIP" -d "$VPIN_TMP" 2>/dev/null || true
+                        rm -f "$VPIN_TMP/$VZIP"
+                    fi
                     for TGZ in "$VPIN_TMP"/*.tar.gz "$VPIN_TMP"/*.tar.xz; do
                         [[ -f "$TGZ" ]] || continue
                         mkdir -p "$VPIN_TMP/extract"
@@ -9888,14 +9837,25 @@ if [[ -f "$VPDIR/VPinballX_BGFX" ]] || [[ -f "$VPDIR/VPinballX_GL" ]]; then
                         tar -xJf "$TGZ" -C "$VPIN_TMP/extract" 2>/dev/null || true
                         rm -f "$TGZ"
                     done
+                    VPIN_GOT=$((VPIN_GOT + 1))
                 fi
             done <<< "$VPIN_URLS"
-            for BIN in VPinballX_BGFX VPinballX_GL; do
-                FOUND=$(find "$VPIN_TMP" -name "$BIN" -type f 2>/dev/null | head -1)
-                [[ -n "$FOUND" ]] && cp "$FOUND" "$VPDIR/$BIN" && chmod +x "$VPDIR/$BIN"
-            done
+            # Sync the whole tree, not just the binaries. Each build ships its
+            # own bundled libs (libSDL3, libbgfx, libwinevbs, ...) and plugins/;
+            # a new binary over the previous build's libs can fail to load.
+            # Nothing user-owned lives in $VPDIR (config is under $HOME, tables
+            # and PinMAME data under ROMs/vpinball/), so overwriting is safe.
+            if (( VPIN_GOT > 0 )) && [[ -d "$VPIN_TMP/extract" ]] \
+               && find "$VPIN_TMP/extract" -type f -name 'VPinballX_*' 2>/dev/null | grep -q .; then
+                if cp -a "$VPIN_TMP/extract/." "$VPDIR/"; then
+                    ok "VPinball updated ($VPIN_TAG)"
+                else
+                    warn "VPinball copy failed — install may be incomplete, re-run update"
+                fi
+            else
+                warn "VPinball download/extract failed — existing install left untouched"
+            fi
             rm -rf "$VPIN_TMP"
-            ok "VPinball updated"
         else
             warn "Could not find download URL"
         fi
@@ -9953,20 +9913,6 @@ if [[ -f "$EMUS/solarus-run" ]]; then
     echo ""
 fi
 
-# Ryubing (Ryujinx fork) left GitHub — releases now live on their own Forgejo
-# server at git.ryujinx.app, and GitHub update support was removed upstream, so
-# the old api.github.com/repos/Ryubing/Ryujinx call always returned nothing
-# ("could not check"). Query the Forgejo (Gitea-compatible) API instead. Best
-# effort: --max-time keeps a slow/unreachable host from hanging the updater,
-# and an empty result degrades to the normal "could not check" line.
-RYUBING_URL=$(curl -sfL --max-time 20 \
-    "https://git.ryujinx.app/api/v1/repos/ryubing/ryujinx/releases/latest" 2>/dev/null \
-    | grep -oP '"browser_download_url":\s*"\K[^"]*' \
-    | grep -P 'x64\.AppImage$' \
-    | grep -ivE 'arm|aarch' \
-    | head -1) || true
-check_and_update "Ryubing (Switch)" "ryujinx*.AppImage" "$RYUBING_URL"
-
 echo ""
 echo -e "${CYAN}RetroArch Cores:${NC}"
 if wt_yesno "Update" "Update all cores from buildbot.libretro.com?"; then
@@ -9999,7 +9945,6 @@ UPDATESCRIPT
 backup_file_if_changed "${UPDATE_FILE}" "${UPDATE_TMP}" "update.sh"
 
 chmod +x "$BASE/update.sh"
-ok "update.sh written to bundle"
 
 #=============================================================================
 # STEP 17: DESKTOP SHORTCUT
@@ -10072,12 +10017,15 @@ echo ""
 # Enumerate every downloaded emulator binary ONCE into an array, then reuse it
 # for both the count and the listing below so the two can never disagree.
 # AppImages may sit flat in $BASE or $EMUS, or nested under $EMUS/<Port>/ and
-# $EMUS/VPinball/. A few emulators ship as plain binaries rather than AppImages
-# (xenia_canary, VPinballX_*) — include those explicitly. $EMUS lives inside
-# $BASE, so search $BASE once to avoid double-counting.
+# $EMUS/VPinball/. Several emulators ship as plain binaries rather than
+# AppImages (xenia_canary, shadps4, ruffle, solarus-run, simcoupe, VPinballX_*)
+# — include those explicitly. $EMUS lives inside $BASE, so search $BASE once to
+# avoid double-counting.
 mapfile -t DOWNLOADED_BINS < <(
     find "$BASE" -maxdepth 3 -type f -iname '*.AppImage' 2>/dev/null
-    [[ -f "$EMUS/xenia_canary" ]] && printf '%s\n' "$EMUS/xenia_canary"
+    for _bin in xenia_canary shadps4 ruffle solarus-run simcoupe; do
+        if [[ -f "$EMUS/$_bin" ]]; then printf '%s\n' "$EMUS/$_bin"; fi
+    done
     find "$EMUS" -maxdepth 2 -type f -name 'VPinballX*' 2>/dev/null
 )
 APPIMAGE_COUNT=${#DOWNLOADED_BINS[@]}
@@ -10104,7 +10052,7 @@ box_rule '╔' '╗'
 box_line "  Setup complete!"
 box_rule '╠' '╣'
 box_blank
-box_line "  $APPIMAGE_COUNT AppImages downloaded"
+box_line "  $APPIMAGE_COUNT emulators/apps downloaded"
 box_line "  $CORE_COUNT RetroArch cores installed"
 ((DOWNLOAD_ERRORS > 0)) && box_line "  $DOWNLOAD_ERRORS download(s) need manual attention"
 box_blank
@@ -10118,7 +10066,7 @@ box_line "    1. Add ROMs to ROMs/<system>/"
 box_line "    2. Add BIOS files to ROMs/bios/"
 box_line "    3. Run: ./launch.sh"
 box_blank
-box_line "  Source ports (Commander Keen, Tyrian, Cave Story, OpenRA...):"
+box_line "  Source ports (Keen, Tyrian, Cave Story, OpenRA...):"
 box_line "    Put each port's game data in its OWN folder:"
 box_line "      Emulators/<Port>/"
 box_line "      e.g. Emulators/Commander-Genius/ (Keen game files)"
