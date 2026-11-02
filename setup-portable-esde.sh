@@ -3747,7 +3747,7 @@ if ! command -v fusermount &>/dev/null && ! [[ -f /usr/lib/libfuse.so.2 ]]; then
     echo ""
 fi
 
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR" || exit 1
 export HOME="$SCRIPT_DIR"
 # Redirect XDG base dirs into the bundle too. HOME alone is not enough: many
 # desktops preset XDG_CONFIG_HOME/XDG_DATA_HOME in the session, which child
@@ -3799,9 +3799,11 @@ apply_paths() {
 # portable bundle, and external-drive mount points differ per machine),
 # those stale paths break emulator, core, BIOS and save resolution.
 # es_settings.xml ROM/media paths are handled by apply_paths above; this
-# heals the other two on every launch.
+# heals the others (incl. Eden and Dolphin) on every launch.
 RA_CFG="$SCRIPT_DIR/.config/retroarch/retroarch.cfg"
 FIND_RULES="$SCRIPT_DIR/ES-DE/custom_systems/es_find_rules.xml"
+EDEN_CFG="$SCRIPT_DIR/.config/eden/qt-config.ini"
+DOLPHIN_CFG="$SCRIPT_DIR/.config/dolphin-emu/Dolphin.ini"
 BUNDLE_MARK="$SCRIPT_DIR/.bundle-path"
 
 heal_paths() {
@@ -3822,25 +3824,33 @@ heal_paths() {
             "$RA_CFG" 2>/dev/null || true
     fi
 
-    # es_find_rules.xml: entries interleave bundle paths with system/flatpak
-    # fallbacks, so we replace ONLY the old bundle base with the new one,
-    # tracked via .bundle-path. Literal replace via python3 (no escaping
-    # pitfalls); sed fallback if python3 is absent.
-    if [[ -f "$FIND_RULES" && -f "$BUNDLE_MARK" ]]; then
-        local old; old=$(cat "$BUNDLE_MARK" 2>/dev/null || true)
+    # es_find_rules.xml, Eden, Dolphin: replace only the old bundle base (from
+    # .bundle-path), as whole paths. /home and /var/home are the same dir on
+    # Fedora Atomic, so both forms are replaced.
+    if [[ -f "$BUNDLE_MARK" ]]; then
+        local old; old=$(cat "$BUNDLE_MARK" 2>/dev/null || true); old="${old%/}"
         if [[ -n "$old" && "$old" != "$SCRIPT_DIR" ]]; then
             if command -v python3 >/dev/null 2>&1; then
-                OLD_BASE="$old" NEW_BASE="$SCRIPT_DIR" python3 - "$FIND_RULES" <<'PYHEAL' 2>/dev/null || true
-import os, sys
-f = sys.argv[1]; old = os.environ["OLD_BASE"]; new = os.environ["NEW_BASE"]
-with open(f, encoding="utf-8", errors="replace") as fh: s = fh.read()
-with open(f, "w", encoding="utf-8") as fh: fh.write(s.replace(old, new))
+                OLD_BASE="$old" NEW_BASE="$SCRIPT_DIR" python3 - "$FIND_RULES" "$EDEN_CFG" "$DOLPHIN_CFG" <<'PYHEAL' 2>/dev/null || true
+import os, re, sys
+old = os.environ["OLD_BASE"]; new = os.environ["NEW_BASE"]
+olds = {old, old[4:] if old.startswith("/var/home/") else "/var" + old if old.startswith("/home/") else old}
+pat = re.compile(r"(?<![\w./-])(?:" + "|".join(map(re.escape, sorted(olds, key=len, reverse=True))) + r")(?![\w.-])")
+for f in sys.argv[1:]:
+    try:
+        with open(f, encoding="utf-8", errors="replace") as fh: s = fh.read()
+    except OSError: continue
+    h = pat.sub(lambda m: new, s)
+    if h != s:
+        with open(f, "w", encoding="utf-8") as fh: fh.write(h)
 PYHEAL
             else
-                local oe ne
+                local oe ne f
                 oe=$(printf '%s' "$old" | sed -e 's/[][\\.^$*/]/\\&/g')
                 ne=$(printf '%s' "$SCRIPT_DIR" | sed -e 's/[&\\/]/\\&/g')
-                sed -i "s/$oe/$ne/g" "$FIND_RULES" 2>/dev/null || true
+                for f in "$FIND_RULES" "$EDEN_CFG" "$DOLPHIN_CFG"; do
+                    [[ -f "$f" ]] && sed -i "s/$oe/$ne/g" "$f" 2>/dev/null || true
+                done
             fi
         fi
     fi
@@ -3864,6 +3874,58 @@ LAUNCHER
 backup_file_if_changed "${LAUNCH_FILE}" "${LAUNCH_TMP}" "launch.sh"
 
 chmod +x "$BASE/launch.sh"
+
+# fix-permissions.sh: restores +x after a copy that lost permissions.
+FIXPERMS_FILE="$BASE/fix-permissions.sh"
+FIXPERMS_TMP="${FIXPERMS_FILE}.tmp.$$"
+cat > "${FIXPERMS_TMP}" << 'FIXPERMS'
+#!/usr/bin/env bash
+#=============================================================================
+# Portable ES-DE — Restore Execute Permissions
+# Makes scripts, AppImages, cores and emulator binaries executable again after
+# a copy that lost permissions (exFAT/NTFS, some file managers). ROMs untouched.
+# ELF check is limited to Emulators/ and .local/bin (RPCS3 firmware is ELF too).
+# Usage: bash fix-permissions.sh
+#=============================================================================
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+is_elf() {
+    local m; m=$(head -c 4 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    [[ "$m" == "7f454c46" ]]
+}
+
+fixed=0
+fix() {
+    chmod 755 "$1"
+    echo -e "   ${CYAN}→${NC} ${1#./}"
+    fixed=$((fixed + 1))
+}
+
+# Scripts, anywhere
+while IFS= read -r -d '' f; do
+    fix "$f"
+done < <(find . -type f -name '*.sh' ! -perm -u+x -print0)
+
+# Apps and binaries, outside ROMs/
+while IFS= read -r -d '' f; do
+    case "$f" in
+        *.sh) ;;
+        *.AppImage|*.so) fix "$f" ;;
+        ./Emulators/*|./.local/bin/*) if is_elf "$f"; then fix "$f"; fi ;;
+    esac
+done < <(find . -path ./ROMs -prune -o -type f ! -perm -u+x -print0)
+
+echo -e "   ${GREEN}✓${NC} $fixed file(s) made executable"
+FIXPERMS
+backup_file_if_changed "${FIXPERMS_FILE}" "${FIXPERMS_TMP}" "fix-permissions.sh"
+
+chmod +x "$BASE/fix-permissions.sh"
+ok "fix-permissions.sh written"
 
 #=============================================================================
 # STEP 7: BIOS + MAIN README
@@ -4086,6 +4148,7 @@ Each port appears in the ES-DE **Ports** system. Every port lives in its own fol
 ES-DE/
 ├── ES-DE_x64.AppImage
 ├── launch.sh
+├── fix-permissions.sh
 ├── update.sh
 ├── import-collection.sh
 ├── fetch-vpx-patches.sh
@@ -4172,6 +4235,36 @@ The importer checks BIOS status and routes recognised BIOS sidecars into `ROMs/b
 ```
 
 The update helper checks ES-DE and emulator AppImages, and can refresh all RetroArch cores from the buildbot. It keeps existing files unless you choose to replace them.
+
+</details>
+
+<details>
+<summary><strong>Moving or copying the bundle</strong></summary>
+
+The whole folder is portable: move or copy it to another folder, drive or machine (for example a Steam Deck SD card) and start it with `./launch.sh`. On every launch it rewrites the absolute paths stored in configs to the bundle's current location:
+
+- ES-DE ROM and media folders (`es_settings.xml`) and emulator locations (`es_find_rules.xml`)
+- RetroArch core, BIOS, save, state, screenshot and log folders
+- Eden NAND, SD, load and dump folders (Switch firmware, keys and saves) and game folders
+- Dolphin game folder
+
+The previous location is read from the hidden `.bundle-path` file, so copy hidden files too (see below).
+
+When copying, include the hidden files and keep permissions:
+
+```bash
+rsync -a ES-DE/ /path/to/new/ES-DE/
+```
+
+The hidden folders (`.config`, `.local`) hold every emulator's settings, firmware, keys and many saves; a copy without them starts from scratch. `.cache` can be skipped, it is rebuilt.
+
+If a copy lost execute permissions (exFAT/NTFS drives, some file managers, cloud sync), restore them with:
+
+```bash
+bash fix-permissions.sh
+```
+
+It marks scripts, AppImages, RetroArch cores and emulator binaries executable again and never touches ROMs.
 
 </details>
 
