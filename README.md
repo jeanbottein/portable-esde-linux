@@ -370,7 +370,7 @@ The whole folder is portable: move or copy it to another folder, drive or machin
 - Eden NAND, SD, load and dump folders (Switch firmware, keys and saves) and game folders
 - Dolphin game folder
 
-The previous location is read from `.bundle-path` and from the config files themselves, so paths still heal if `.bundle-path` is missing or stale.
+The previous location is read from the hidden `.bundle-path` file, so copy hidden files too (see below).
 
 When copying, include the hidden files and keep permissions:
 
